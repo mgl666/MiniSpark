@@ -33,7 +33,8 @@ _SLASH_HELP = """[bold]会话命令[/bold]
   /sessions       列出所有会话
   /load <名称>    切换到指定会话
   /delete <名称>  删除指定会话的历史
-  /history [n]    查看当前会话最近 n 条消息（默认 10）
+  /history         查看当前会话全部消息
+  /history -n N    查看当前会话最近 N 条消息
   /compact        强制压缩当前会话上下文（旧消息摘要化）
 [bold]记忆命令[/bold]
   /memory         查看所有长期记忆
@@ -118,8 +119,8 @@ def _print_banner(config: Config, agent: Agent, email_channel: Any = None) -> No
     console.print(Panel(banner, border_style="cyan", width=min(100, console.width)))
 
 
-def _show_history(session: Session, limit: int = 10) -> None:
-    """打印当前会话最近 limit 条消息。"""
+def _show_history(session: Session, limit: int = 0) -> None:
+    """打印当前会话消息。limit=0 显示全部，limit>0 显示最近 limit 条。"""
     msgs = session.messages[-limit:] if limit > 0 else session.messages
     if not msgs:
         console.print("[dim]（当前会话暂无历史）[/dim]")
@@ -129,8 +130,6 @@ def _show_history(session: Session, limit: int = 10) -> None:
     for m in msgs:
         role = str(m.get("role"))
         content = str(m.get("content") or "").replace("\n", " ")
-        if len(content) > 100:
-            content = content[:100] + "…"
         console.print(f"[{style.get(role, 'dim')}]{label.get(role, role)}[/]: {content}")
 
 
@@ -284,7 +283,11 @@ async def _handle_slash(
             console.print(f"[red]{result}[/red]")
         return session
     if cmd == "/history":
-        limit = int(arg) if arg.isdigit() else 10
+        limit = 0
+        if arg.startswith("-n ") and arg[3:].strip().isdigit():
+            limit = int(arg[3:].strip())
+        elif arg.isdigit():
+            limit = int(arg)
         _show_history(session, limit)
         return session
     if cmd == "/compact":

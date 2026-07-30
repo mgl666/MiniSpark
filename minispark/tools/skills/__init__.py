@@ -1,4 +1,4 @@
-"""Skill 系统：技能加载器与随包内置技能。"""
+"""Skill system: skill loader and built-in skills shipped with the package."""
 
 from minispark.tools.skills.loader import Skill, discover_skills
 

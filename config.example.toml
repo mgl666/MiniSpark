@@ -1,0 +1,71 @@
+# MiniSpark configuration template
+# Copy this file to config.toml and fill in your credentials.
+# Never commit config.toml or real secrets.
+
+# Any OpenAI-compatible model provider.
+[provider]
+base_url = "https://api.deepseek.com/v1"
+model = "deepseek-chat"
+api_key = ""
+model_list = []
+
+# Agent runtime settings.
+[agent]
+max_turns = 20
+result_char_limit = 8000
+language = "简体中文（用户用其他语言时跟随用户）"
+
+# Conversation history and long-term memory.
+[memory]
+# Empty uses minispark/memory/minispark.db.
+# Relative paths resolve from the process working directory.
+db_path = ""
+recall_top_k = 5
+compact_token_threshold = 48000
+keep_recent_messages = 8
+summary_max_tokens = 1000
+
+# File and shell tool security.
+[tools]
+# Relative paths resolve from the process working directory.
+allowed_dirs = ["."]
+shell_whitelist = []
+shell_blacklist = []
+shell_require_confirm = true
+shell_timeout = 60
+
+# Channel switches.
+[channels]
+cli = true
+wechat = false
+
+# Tencent official QQ Bot API.
+[channels.qq]
+enabled = false
+app_id = ""
+secret = ""
+is_sandbox = false
+
+# Gmail SMTP channel.
+[channels.email]
+enabled = false
+sender = ""
+password = ""
+to = ""
+
+# Scheduled task storage.
+[scheduler]
+enabled = false
+# Empty uses minispark/memory/minispark.db.
+db_path = ""
+
+# Optional MCP stdio server example.
+# [[mcp.servers]]
+# name = "filesystem"
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "/absolute/path/to/allowed"]
+
+# Optional MCP URL server example.
+# [[mcp.servers]]
+# name = "remote-tools"
+# url = "https://example.com/mcp"

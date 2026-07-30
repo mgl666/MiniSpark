@@ -1,7 +1,7 @@
-"""Provider 抽象层。
+"""Provider abstraction layer.
 
-Agent Core 与模型供应商之间的唯一接口：chat(messages, tools) -> ProviderReply。
-保留这层薄抽象，为将来接入非 OpenAI 兼容协议（如 Anthropic 原生 API）留插槽。
+The sole interface between Agent Core and model providers: chat(messages, tools) -> ProviderReply.
+This thin abstraction is kept for future non-OpenAI-compatible protocols (e.g. Anthropic native API).
 """
 
 from __future__ import annotations
@@ -10,49 +10,49 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
-# 消息统一使用 OpenAI chat.completions 的 dict 格式，
-# 会话历史可直接透传给任何兼容端点。
+# Messages use OpenAI chat.completions dict format uniformly,
+# session history can be passed directly to any compatible endpoint.
 Message = dict[str, Any]
 
 
 @dataclass
 class ToolCall:
-    """模型返回的一次工具调用请求。"""
+    """A tool call request returned by the model."""
 
     id: str
-    """工具调用 ID，回填 tool 消息时用于对应。"""
+    """Tool call ID, used to match tool result messages when backfilling."""
 
     name: str
-    """工具名。"""
+    """Tool name."""
 
     arguments: dict[str, Any]
-    """解析后的调用参数。"""
+    """Parsed call arguments."""
 
     raw_arguments: str = "{}"
-    """原始 JSON 字符串，回填 assistant 消息时原样使用，避免二次序列化失真。"""
+    """Original JSON string, used as-is when backfilling assistant messages to avoid double serialization distortion."""
 
 
 @dataclass
 class ProviderReply:
-    """模型一轮回复的结果。"""
+    """Result of one model response round."""
 
     content: str = ""
-    """文本回复（可能为空，如纯工具调用轮）。"""
+    """Text reply (may be empty, e.g. pure tool call round)."""
 
     tool_calls: list[ToolCall] = field(default_factory=list)
-    """本轮请求执行的工具调用列表。"""
+    """List of tool calls to execute this round."""
 
 
 class Provider(ABC):
-    """模型供应商抽象。所有实现对 Agent Core 暴露同一个 chat 接口。"""
+    """Model provider abstraction. All implementations expose the same chat interface to Agent Core."""
 
     @abstractmethod
     async def chat(
         self, messages: list[Message], tools: list[dict[str, Any]] | None = None
     ) -> ProviderReply:
-        """请求模型生成下一轮回复。
+        """Request the model to generate the next round of reply.
 
-        :param messages: OpenAI 格式的完整对话历史（含 system）。
-        :param tools: OpenAI tools 格式的工具 schema 列表，None 表示不提供工具。
-        :return: 模型的文本回复与/或工具调用请求。
+        :param messages: Full conversation history in OpenAI format (including system).
+        :param tools: Tool schema list in OpenAI tools format, None means no tools provided.
+        :return: Model's text reply and/or tool call requests.
         """

@@ -1,4 +1,4 @@
-"""Agent 核心模块：主循环、上下文组装、会话管理、上下文压缩。"""
+"""Agent core module: main loop, context assembly, session management, context compaction."""
 
 from minispark.core.agent import Agent
 from minispark.core.session import Session

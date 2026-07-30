@@ -5,9 +5,9 @@ build-backend = "hatchling.build"
 [project]
 name = "minispark"
 version = "0.1.0"
-description = "一个基于 Python 的轻量化个人 AI Agent 框架"
+description = "A lightweight Python-based personal AI Agent framework"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "MiniSpark" }]
 keywords = ["ai", "agent", "llm", "assistant", "mcp"]

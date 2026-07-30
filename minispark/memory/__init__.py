@@ -1,4 +1,4 @@
-"""记忆系统：SQLite 存储与 FTS 检索。"""
+"""Memory system: SQLite storage and FTS retrieval."""
 
 from minispark.memory.recall import recall_relevant
 from minispark.memory.store import MemoryStore

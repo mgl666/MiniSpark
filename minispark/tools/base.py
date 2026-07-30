@@ -1,7 +1,7 @@
-"""Tool 抽象：用 Python 类型注解 + docstring 自动生成 JSON Schema。
+"""Tool abstraction: auto-generate JSON Schema from Python type annotations + docstrings.
 
-写一个新工具只需写一个带类型注解和 docstring 的函数（支持 sync/async），
-FunctionTool 借助 pydantic 自动完成 schema 生成与参数校验。
+To create a new tool, simply write a function with type annotations and a docstring (supports sync/async).
+FunctionTool uses pydantic to automatically generate schemas and validate parameters.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from pydantic import BaseModel, create_model
 
 
 def _parse_param_docs(docstring: str) -> dict[str, str]:
-    """从 Google 风格 docstring 中提取 ``:param name: 描述``。"""
+    """Extract ``:param name: description`` from Google-style docstrings."""
     docs: dict[str, str] = {}
     for match in re.finditer(r":param\s+(\w+)\s*:\s*(.+)", docstring):
         docs[match.group(1)] = match.group(2).strip()
@@ -24,7 +24,7 @@ def _parse_param_docs(docstring: str) -> dict[str, str]:
 
 
 def _build_params_model(fn: Callable[..., Any]) -> type[BaseModel]:
-    """根据函数签名生成 pydantic 参数模型（用于校验与 schema 导出）。"""
+    """Generate a pydantic parameter model from the function signature (for validation and schema export)."""
     sig = inspect.signature(fn)
     param_docs = _parse_param_docs(inspect.getdoc(fn) or "")
     fields: dict[str, Any] = {}
@@ -41,7 +41,7 @@ def _build_params_model(fn: Callable[..., Any]) -> type[BaseModel]:
 
 
 class FunctionTool:
-    """把一个 Python 函数包装成 Agent 可调用的工具。"""
+    """Wrap a Python function as a tool callable by the Agent."""
 
     def __init__(self, fn: Callable[..., Any], name: str | None = None) -> None:
         doc = inspect.getdoc(fn) or ""
@@ -52,7 +52,7 @@ class FunctionTool:
 
     @staticmethod
     def _extract_description(doc: str) -> str:
-        """提取 docstring 正文（:param 之前的所有行），去掉空行首尾。"""
+        """Extract the docstring body (all lines before :param), trim leading/trailing blank lines."""
         lines = []
         for line in doc.splitlines():
             if line.strip().startswith(":param"):
@@ -62,7 +62,7 @@ class FunctionTool:
 
     @property
     def schema(self) -> dict[str, Any]:
-        """OpenAI tools 格式的 JSON Schema。"""
+        """JSON Schema in OpenAI tools format."""
         params = self._params_model.model_json_schema()
         params.pop("title", None)
         return {
@@ -75,14 +75,14 @@ class FunctionTool:
         }
 
     async def run(self, arguments: dict[str, Any]) -> str:
-        """校验参数并执行函数，返回值统一转成字符串。
+        """Validate parameters and execute the function, always returning a string.
 
-        参数校验失败时抛出 ValueError，由注册表捕获后回填给模型自我修正。
+        Validation errors raise ValueError, caught by the registry and backfilled to the model for self-correction.
         """
         try:
             validated = self._params_model.model_validate(arguments or {})
         except Exception as exc:
-            raise ValueError(f"参数校验失败: {exc}") from exc
+            raise ValueError(f"Parameter validation failed: {exc}") from exc
         result = self.fn(**validated.model_dump())
         if asyncio.iscoroutine(result):
             result = await result
@@ -90,15 +90,15 @@ class FunctionTool:
 
 
 def tool(fn: Callable[..., Any] | None = None, *, name: str | None = None) -> Any:
-    """装饰器：把函数标记为工具。
+    """Decorator: mark a function as a tool.
 
-    用法::
+    Usage::
 
         @tool
         def read_file(path: str) -> str:
-            '''读取文件内容。
+            '''Read file contents.
 
-            :param path: 文件路径
+            :param path: File path
             '''
             ...
     """

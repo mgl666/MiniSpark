@@ -1,21 +1,24 @@
+# macOS
+.DS_Store
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 
-# 打包产物
+# Build artifacts
 *.egg-info/
 *.egg
 dist/
 build/
 
-# 虚拟环境
+# Virtual environment
 .venv/
 venv/
 env/
 
-# 本地配置与数据
+# Local config & data
 .env
 config.toml
 *.db
@@ -27,12 +30,12 @@ config.toml
 .vscode/
 .idea/
 
-# 测试
+# Tests
 tests/
 .pytest_cache/
 .ruff_cache/
 .coverage
 htmlcov/
-
-# 运行时
+MiniSpark项目规划书.md
+# Runtime
 minispark/memory/*.db*

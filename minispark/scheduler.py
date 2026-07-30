@@ -32,7 +32,10 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
     prompt TEXT NOT NULL,
     channel TEXT NOT NULL DEFAULT '',
     enabled INTEGER NOT NULL DEFAULT 1,
-    created_at REAL NOT NULL
+    created_at REAL NOT NULL,
+    openid TEXT NOT NULL DEFAULT '',
+    group_openid TEXT NOT NULL DEFAULT '',
+    msg_type TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -56,6 +59,9 @@ class ScheduledTask:
     channel: str = ""
     enabled: bool = True
     created_at: float = 0.0
+    openid: str = ""
+    group_openid: str = ""
+    msg_type: str = ""
 
 
 class SchedulerStore:
@@ -67,12 +73,22 @@ class SchedulerStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute(_SCHEDULE_SCHEMA)
         self._conn.commit()
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """补全旧表缺失的列（openid / group_openid / msg_type）。"""
+        for col, col_type in [("openid", "TEXT NOT NULL DEFAULT ''"), ("group_openid", "TEXT NOT NULL DEFAULT ''"), ("msg_type", "TEXT NOT NULL DEFAULT ''")]:
+            try:
+                self._conn.execute(f"ALTER TABLE scheduled_tasks ADD COLUMN {col} {col_type}")
+                self._conn.commit()
+            except Exception:
+                pass
 
     def save(self, task: ScheduledTask) -> None:
         self._conn.execute(
-            "INSERT OR REPLACE INTO scheduled_tasks (id, name, cron_expression, run_at, prompt, channel, enabled, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (task.id, task.name, task.cron_expression, task.run_at, task.prompt, task.channel, int(task.enabled), task.created_at),
+            "INSERT OR REPLACE INTO scheduled_tasks (id, name, cron_expression, run_at, prompt, channel, enabled, created_at, openid, group_openid, msg_type) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (task.id, task.name, task.cron_expression, task.run_at, task.prompt, task.channel, int(task.enabled), task.created_at, task.openid, task.group_openid, task.msg_type),
         )
         self._conn.commit()
 
@@ -100,6 +116,9 @@ def _row_to_task(row: sqlite3.Row) -> ScheduledTask:
         channel=row["channel"],
         enabled=bool(row["enabled"]),
         created_at=row["created_at"],
+        openid=row["openid"] if "openid" in row.keys() else "",
+        group_openid=row["group_openid"] if "group_openid" in row.keys() else "",
+        msg_type=row["msg_type"] if "msg_type" in row.keys() else "",
     )
 
 
@@ -123,6 +142,10 @@ class Scheduler:
     def bind_agent(self, agent_fn: Callable[[str], Any]) -> None:
         """绑定 Agent 执行函数。``agent_fn(prompt)`` 将被调度器调用。"""
         self._agent_fn = agent_fn
+
+    def set_on_result(self, on_result: Callable[[ScheduledTask, str], Any]) -> None:
+        """设置任务结果回调。``on_result(task, result)`` 在任务完成后被调用。"""
+        self._on_result = on_result
 
     def start(self) -> None:
         """启动调度器，恢复持久化任务。过期的一次性任务自动清理。"""

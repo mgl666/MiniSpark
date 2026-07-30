@@ -1,10 +1,10 @@
-"""Skill 加载器：扫描技能目录、解析 SKILL.md，产出技能表。
+"""Skill loader: scan skill directories, parse SKILL.md, produce skill table.
 
-一个技能 = 一个文件夹，内含 SKILL.md（frontmatter 声明 name/description + Markdown 指令正文）。
-技能本质是 prompt：常驻上下文只有 name + description 一行摘要，模型判断任务匹配时
-通过 use_skill 工具加载完整正文（渐进式披露，参考 Hermes / Claude Code 的 Skill 形态）。
+A skill = a folder containing SKILL.md (frontmatter declaring name/description + Markdown instruction body).
+Skills are essentially prompts: only a one-line summary (name + description) stays in context,
+the model loads the full body via use_skill when a task matches (progressive disclosure, inspired by Hermes / Claude Code Skill patterns).
 
-所有技能统一放在包内 minispark/tools/skills/library/ 目录下，一个技能一个文件夹。
+All skills are placed under the package's minispark/tools/skills/library/ directory, one folder per skill.
 """
 
 from __future__ import annotations
@@ -24,15 +24,15 @@ _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
 
 @dataclass
 class Skill:
-    """一个已解析的技能。"""
+    """A parsed skill."""
 
     name: str
     description: str
     content: str
-    """SKILL.md 去掉 frontmatter 后的指令正文。"""
+    """SKILL.md instruction body after removing frontmatter."""
     triggers: list[str] = field(default_factory=list)
     path: str = ""
-    """来源文件路径，便于用户定位修改。"""
+    """Source file path, for user reference."""
 
 
 def _unquote(value: str) -> str:
@@ -42,9 +42,9 @@ def _unquote(value: str) -> str:
 
 
 def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    """解析 YAML frontmatter 的最小子集：平铺 ``key: value`` 与 ``- `` 列表。
+    """Parse a minimal subset of YAML frontmatter: flat ``key: value`` and ``- `` lists.
 
-    不引入 PyYAML：技能元数据只需要这两样。返回 (meta, 正文)。
+    No PyYAML dependency: skill metadata only needs these two patterns. Returns (meta, body).
     """
     match = _FRONTMATTER_RE.match(text)
     if not match:
@@ -72,7 +72,7 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 
 
 def _load_from(base: Any, into: dict[str, Skill]) -> None:
-    """从一个目录递归加载技能。``base`` 是 Path 或 importlib.resources 的 Traversable。"""
+    """Recursively load skills from a directory. ``base`` is a Path or importlib.resources Traversable."""
     try:
         entries = sorted(base.iterdir(), key=lambda e: e.name)
     except (FileNotFoundError, NotADirectoryError, OSError):
@@ -90,10 +90,10 @@ def _load_from(base: Any, into: dict[str, Skill]) -> None:
         name = str(meta.get("name") or entry.name).strip()
         description = str(meta.get("description") or "").strip()
         if not description:
-            logger.warning("技能 %s 缺少 description，跳过（%s）", name, skill_file)
+            logger.warning("Skill %s missing description, skipping (%s)", name, skill_file)
             continue
         if name in into:
-            logger.warning("技能 %s 重名：%s 覆盖 %s", name, skill_file, into[name].path)
+            logger.warning("Skill %s duplicate name: %s overwrites %s", name, skill_file, into[name].path)
         triggers = meta.get("triggers") or []
         if isinstance(triggers, str):
             triggers = [triggers]
@@ -107,9 +107,9 @@ def _load_from(base: Any, into: dict[str, Skill]) -> None:
 
 
 def discover_skills(skills_dir: Path | None = None) -> dict[str, Skill]:
-    """扫描技能目录，返回 name -> Skill 字典。
+    """Scan the skills directory and return a name -> Skill dictionary.
 
-    :param skills_dir: 技能目录，默认包内 minispark/tools/skills/（测试可传临时目录）。
+    :param skills_dir: Skills directory, defaults to package's minispark/tools/skills/ (tests can pass a temp dir).
     """
     skills: dict[str, Skill] = {}
     _load_from(skills_dir or files("minispark.tools.skills"), skills)

@@ -1,6 +1,6 @@
-"""Gmail 邮件通道。
+"""Gmail email channel.
 
-通过 SMTP + 应用专用密码发送邮件，纯 Python 内置，无需任何外部依赖。
+Send emails via SMTP + App Password, pure Python built-in, zero external dependencies.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class EmailChannel:
-    """Gmail SMTP 邮件发送通道。"""
+    """Gmail SMTP email sending channel."""
 
     def __init__(self, sender: str, password: str, to: str = "") -> None:
         self._sender = sender
@@ -25,7 +25,7 @@ class EmailChannel:
         return True
 
     def verify(self) -> str:
-        return "SMTP 模式无需授权，已就绪"
+        return "SMTP mode, no authorization required, ready"
 
     def send(self, to: str, subject: str, body: str) -> bool:
         try:
@@ -37,8 +37,8 @@ class EmailChannel:
             with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
                 server.login(self._sender, self._password)
                 server.sendmail(self._sender, [to], msg.as_string())
-            logger.info("邮件已发送 -> %s", to)
+            logger.info("Email sent -> %s", to)
             return True
         except Exception:
-            logger.exception("邮件发送失败 -> %s", to)
+            logger.exception("Email send failed -> %s", to)
             return False

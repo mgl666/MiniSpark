@@ -1,8 +1,8 @@
-"""工具层：Tool 抽象、注册表、Function Call / Skill / MCP 三种扩展机制。
+"""Tool layer: Tool abstraction, registry, and three extension mechanisms (Function Call / Skill / MCP).
 
-内置 Function Call 工具在 function_call/ 子目录下（fs / shell / web / memory……），
-新增工具在 function_call/ 建一个 .py 文件，写一个带类型注解和 docstring 的函数，
-再到 ``core/agent.py`` 的 ``build_default_registry`` 注册即可。
+Built-in Function Call tools are in the function_call/ subdirectory (fs / shell / web / memory...),
+To add a new tool, create a .py file in function_call/, write a function with type annotations and docstring,
+then register it in ``build_default_registry`` in ``core/agent.py``.
 """
 
 from minispark.tools.base import FunctionTool, tool

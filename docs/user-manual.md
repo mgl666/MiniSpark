@@ -265,7 +265,8 @@ The most basic interaction mode — chat with the Agent in the terminal. The CLI
 | `/sessions` | List all sessions |
 | `/load <name>` | Switch to a specific session |
 | `/delete <name>` | Delete a session's history |
-| `/history [n]` | Show the last n messages of current session (default 10) |
+| `/history` | Show all messages of current session (full content, no truncation) |
+| `/history -n N` | Show the last N messages of current session (full content, no truncation) |
 | `/compact` | Force compact current session context (summarize old messages) |
 | `/memory` | View all long-term memories |
 | `/forget <id>` | Delete a long-term memory by ID (IDs from `/memory`) |
@@ -304,6 +305,34 @@ is_sandbox = false             # false=production, true=sandbox testing
 - Bot accounts only (not personal accounts)
 - Can only proactively message users who have interacted with the bot
 - In group chats, the bot must be @mentioned to receive messages
+
+**Background / Daemon Mode:**
+
+The QQ channel supports silent background running, freeing up the terminal — ideal for long-term server deployment.
+
+```bash
+# Foreground mode (stops with Ctrl+C, occupies terminal)
+python -m minispark qq
+
+# Background daemon mode (terminal-free, runs persistently)
+python -m minispark qq --background
+python -m minispark qq -b               # shorthand
+
+# Check background running status
+python -m minispark qq-status
+
+# Stop the background process
+python -m minispark qq-stop
+```
+
+In background mode, process info is stored at `~/.minispark/qq.pid`, and logs are written to `~/.minispark/qq.log`. Running `--background` again when a process is already running will detect the existing instance and prevent duplicate launches.
+
+**Mode Comparison:**
+
+| Command | Terminal | Log Output | Stop Method | Use Case |
+|---|---|---|---|---|
+| `python -m minispark qq` | Occupied | Real-time in terminal | Ctrl+C | Development / Debug |
+| `python -m minispark qq -b` | Free | `~/.minispark/qq.log` | `qq-stop` | Server deployment |
 
 ### 4.3 Email Channel
 
@@ -790,18 +819,45 @@ args = ["-y", "@anthropic/mcp-filesystem", "/path/to/dir"]
 
 - Python 3.11+
 - 1GB RAM (minimum)
-- Dependencies: `pip install -e .`
+- Git (for cloning and updating)
 
-### Step 1: Install
+### Step 1: Deploy (Debian/Ubuntu Server)
 
 ```bash
+# 1. Install Git (skip if already installed)
+sudo apt update && sudo apt install git -y
+
+# 2. Clone the project
+git clone https://github.com/mgl666/MiniSpark.git
 cd MiniSpark
+
+# 3. Install dependencies (one command installs all core dependencies)
+pip install -e .
+```
+
+Core dependencies (8 total, all lightweight): `openai`, `httpx`, `websockets`, `certifi`, `pydantic`, `typer`, `rich`, `apscheduler`.
+
+Since MiniSpark is installed with `pip install -e .` (editable mode), updating is as simple as pulling the latest code — changes take effect immediately:
+
+```bash
+git pull
+```
+
+If new dependencies were added upstream, re-run the install (already installed packages are skipped):
+
+```bash
 pip install -e .
 ```
 
 ### Step 2: Configure
 
-Edit `config.toml`, fill in your API Key:
+Copy the configuration template, then fill in your API Key:
+
+```bash
+cp config.example.toml config.toml
+```
+
+Edit `config.toml`:
 
 ```toml
 [provider]
@@ -839,7 +895,11 @@ is_sandbox = true    # Test in sandbox first
 4. Start:
 
 ```bash
+# Foreground mode (for development/debug)
 python -m minispark qq
+
+# Background daemon mode (for server deployment)
+python -m minispark qq -b
 ```
 
 ### Step 5: Enable Email (Optional)
@@ -864,5 +924,6 @@ python -m minispark serve
 
 # Or create in CLI conversation
 python -m minispark chat
+# > Push THS news headlines to QQ every morning at 8 AM
 # > Push stock headlines to QQ every morning at 8 AM
 ```

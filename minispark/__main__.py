@@ -1,4 +1,4 @@
-"""python -m minispark 入口。"""
+"""python -m minispark entry point."""
 
 from minispark.cli import app
 

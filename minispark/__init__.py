@@ -1,11 +1,11 @@
-"""MiniSpark - 轻量化个人 AI Agent 框架。
+"""MiniSpark - Lightweight personal AI Agent framework.
 
-库嵌入用法::
+Library embedding usage::
 
     from minispark import Agent
 
     agent = Agent.from_config("config.toml")
-    reply = await agent.run("帮我总结这个目录下的代码")
+    reply = await agent.run("Summarize the code in this directory for me")
 """
 
 from __future__ import annotations

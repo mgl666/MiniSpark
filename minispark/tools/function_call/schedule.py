@@ -1,6 +1,6 @@
-"""定时任务工具：schedule_task / list_tasks / cancel_task。
+"""Scheduled task tools: schedule_task / list_tasks / cancel_task.
 
-让 Agent 在对话中自助创建、查看和取消定时任务。
+Allows the Agent to create, view, and cancel scheduled tasks during conversations.
 """
 
 from __future__ import annotations
@@ -13,19 +13,22 @@ from minispark.tools.base import FunctionTool
 
 
 def create_schedule_tools(scheduler: Scheduler) -> list[FunctionTool]:
-    """按调度器实例创建定时任务工具组。"""
+    """Create scheduled task tool group based on the scheduler instance."""
 
-    def schedule_task(name: str, run_at: str = "", cron_expression: str = "", prompt: str = "", channel: str = "") -> str:
-        """【关键】创建一次性或周期定时任务。
+    def schedule_task(name: str, run_at: str = "", cron_expression: str = "", prompt: str = "", channel: str = "", openid: str = "", group_openid: str = "", msg_type: str = "") -> str:
+        """[IMPORTANT] Create a one-time or recurring scheduled task.
 
-        用户要求“稍后、几分钟后、明天等指定时间或周期执行”时，应调用本工具，
-        不要立即执行。将到期后需要执行的完整请求写入 prompt。
+        When the user asks to 'do something later, in a few minutes, tomorrow, or at a specific time/interval',
+        call this tool instead of executing immediately. Put the full request to execute at the due time into prompt.
 
-        :param name: 简短任务名称
-        :param run_at: 一次性执行时间，ISO 格式
-        :param cron_expression: 周期任务的 cron 表达式
-        :param prompt: 到期后执行的完整请求
-        :param channel: 可选的结果推送通道
+        :param name: Short task name
+        :param run_at: One-time execution time, ISO format
+        :param cron_expression: Cron expression for recurring tasks
+        :param prompt: Full request to execute at the due time
+        :param channel: Optional result push channel
+        :param openid: Internal use, do not set
+        :param group_openid: Internal use, do not set
+        :param msg_type: Internal use, do not set
         """
         task = ScheduledTask(
             id=uuid.uuid4().hex[:12],
@@ -34,39 +37,42 @@ def create_schedule_tools(scheduler: Scheduler) -> list[FunctionTool]:
             run_at=run_at.strip(),
             prompt=prompt.strip(),
             channel=channel.strip(),
+            openid=openid.strip(),
+            group_openid=group_openid.strip(),
+            msg_type=msg_type.strip(),
             created_at=time.time(),
         )
         scheduler.add(task)
         if run_at.strip():
-            return f"已创建定时任务「{task.name}」(ID: {task.id})，将于 {run_at.strip()} 执行"
-        return f"已创建定时任务「{task.name}」(ID: {task.id})，cron: {task.cron_expression}"
+            return f"Scheduled task '{task.name}' created (ID: {task.id}), will execute at {run_at.strip()}"
+        return f"Scheduled task '{task.name}' created (ID: {task.id}), cron: {task.cron_expression}"
 
     def list_tasks() -> str:
-        """列出所有已创建的定时任务。"""
+        """List all created scheduled tasks."""
         tasks = scheduler.list()
         if not tasks:
-            return "当前没有定时任务。"
+            return "No scheduled tasks at the moment."
         lines = []
         for t in tasks:
-            status = "启用" if t.enabled else "停用"
-            ch = f" → {t.channel}" if t.channel else ""
+            status = "enabled" if t.enabled else "disabled"
+            ch = f" -> {t.channel}" if t.channel else ""
             if t.run_at:
-                schedule = f"定时 {t.run_at}（一次性）"
+                schedule = f"at {t.run_at} (one-time)"
             elif t.cron_expression:
                 schedule = f"cron: {t.cron_expression}"
             else:
-                schedule = "无效"
+                schedule = "invalid"
             lines.append(f"- [{status}] {t.name} (ID: {t.id}) {schedule}{ch}")
         return "\n".join(lines)
 
     def cancel_task(task_id: str) -> str:
-        """取消一个定时任务。
+        """Cancel a scheduled task.
 
-        :param task_id: 任务 ID（创建时返回或从 list_tasks 获取）
+        :param task_id: Task ID (returned during creation or from list_tasks)
         """
         if scheduler.remove(task_id.strip()):
-            return f"已取消定时任务 (ID: {task_id})"
-        return f"未找到定时任务 (ID: {task_id})"
+            return f"Scheduled task cancelled (ID: {task_id})"
+        return f"Scheduled task not found (ID: {task_id})"
 
     return [
         FunctionTool(schedule_task),

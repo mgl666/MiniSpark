@@ -1,4 +1,4 @@
-"""模型接入层：Provider 抽象 + OpenAI 兼容通用接口。"""
+"""Provider layer: Provider abstraction + OpenAI-compatible universal interface."""
 
 from minispark.providers.base import Message, Provider, ProviderReply, ToolCall
 from minispark.providers.openai_compat import OpenAICompatProvider

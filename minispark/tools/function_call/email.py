@@ -1,6 +1,6 @@
-"""邮件发送工具：send_email。
+"""Email sending tool: send_email.
 
-让 Agent 在对话中直接发送邮件。
+Allows the Agent to send emails directly during conversations.
 """
 
 from __future__ import annotations
@@ -14,14 +14,14 @@ if TYPE_CHECKING:
 
 
 def create_email_tools(email_channel: EmailChannel, default_to: str = "") -> list[FunctionTool]:
-    """按邮件通道实例创建邮件工具。"""
+    """Create email tools based on the email channel instance."""
 
     def send_email(to: str, subject: str, body: str) -> str:
-        """发送邮件到指定邮箱。用户未指定收件人时，to 填默认收件人。
+        """Send an email to the specified address. When no recipient is specified, use the default.
 
-        :param to: 收件人邮箱地址，多个地址用英文逗号分隔。用户未指定时填默认收件人
-        :param subject: 邮件主题
-        :param body: 邮件正文（纯文本）
+        :param to: Recipient email address, multiple addresses separated by commas. Use default when not specified
+        :param subject: Email subject
+        :param body: Email body (plain text)
         """
         if not to and default_to:
             to = default_to
@@ -30,7 +30,7 @@ def create_email_tools(email_channel: EmailChannel, default_to: str = "") -> lis
             if email_channel.send(addr, subject, body):
                 oks.append(addr)
         if oks:
-            return f"邮件已发送到 {', '.join(oks)}"
-        return f"邮件发送失败，请检查邮箱配置"
+            return f"Email sent to {', '.join(oks)}"
+        return f"Email send failed, please check email configuration"
 
     return [FunctionTool(send_email)]

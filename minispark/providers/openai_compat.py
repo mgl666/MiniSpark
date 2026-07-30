@@ -1,7 +1,7 @@
-"""OpenAI 兼容通用接口。
+"""OpenAI-compatible universal interface.
 
-一份代码覆盖所有 OpenAI 兼容端点：OpenAI / DeepSeek / Kimi / 通义 / 智谱 /
-vLLM / Ollama 等。切换模型 = 改配置文件，不改代码。
+One codebase covers all OpenAI-compatible endpoints: OpenAI / DeepSeek / Kimi / Tongyi / Zhipu /
+vLLM / Ollama, etc. Switching models = changing config file, no code changes.
 """
 
 from __future__ import annotations
@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAICompatProvider(Provider):
-    """基于 openai 官方 SDK 的通用 Provider，指向任意 base_url。"""
+    """Universal Provider based on the official openai SDK, pointing to any base_url."""
 
     def __init__(self, config: ProviderConfig) -> None:
         self._model = config.model
-        # 本地端点（如 Ollama）通常不校验 key，用占位符避免 SDK 报错
+        # Local endpoints (e.g. Ollama) typically don't validate keys, use placeholder to avoid SDK errors
         self._client = AsyncOpenAI(
             base_url=config.base_url,
             api_key=config.api_key or "EMPTY",
@@ -39,7 +39,7 @@ class OpenAICompatProvider(Provider):
         return self._model
 
     async def fetch_models(self) -> list[str]:
-        """从 API 获取可用模型列表（结果缓存，首次调用后不再请求）。"""
+        """Fetch available model list from the API (cached, only requested once)."""
         if self._cached_models is not None:
             return self._cached_models
         try:
@@ -48,7 +48,7 @@ class OpenAICompatProvider(Provider):
                 [m.id for m in resp.data if m.id and not m.id.startswith("ft:")]
             )
         except Exception:
-            logger.warning("获取模型列表失败，返回空列表", exc_info=True)
+            logger.warning("Failed to fetch model list, returning empty list", exc_info=True)
             self._cached_models = []
         return self._cached_models
 
@@ -59,7 +59,7 @@ class OpenAICompatProvider(Provider):
         if tools:
             kwargs["tools"] = tools
         logger.debug(
-            "请求模型 %s（%d 条消息，%d 个工具）", self._model, len(messages), len(tools or [])
+            "Requesting model %s (%d messages, %d tools)", self._model, len(messages), len(tools or [])
         )
         resp = await self._client.chat.completions.create(**kwargs)
         message = resp.choices[0].message
@@ -73,7 +73,7 @@ class OpenAICompatProvider(Provider):
                     arguments = {}
             except json.JSONDecodeError:
                 logger.warning(
-                    "工具 %s 参数 JSON 解析失败，按空调用处理: %s", tc.function.name, raw
+                    "Tool %s argument JSON parsing failed, treating as empty call: %s", tc.function.name, raw
                 )
                 arguments = {}
             tool_calls.append(

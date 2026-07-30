@@ -9,20 +9,20 @@ import asyncio
 import json
 import logging
 import ssl
-import uuid
+
 from pathlib import Path
 from typing import Any
 
 import certifi
 import httpx
 import websockets
-from rich.console import Console
-
 from minispark.config import Config
 from minispark.core.agent import Agent
 from minispark.core.session import Session
+from minispark.memory.store import MemoryStore
+from minispark.scheduler import ScheduledTask
+from minispark.tools.function_call.schedule import create_schedule_tools
 
-console = Console()
 logger = logging.getLogger("minispark.qq")
 
 # ── 常量 ──────────────────────────────────────────────
@@ -38,10 +38,8 @@ OP_IDENTIFY = 2
 OP_HELLO = 10
 OP_HEARTBEAT_ACK = 11
 
-# QQ Bot Intents（按位或）
-INTENT_C2C = 1 << 25       # C2C_MESSAGE_CREATE 私聊消息
-INTENT_GROUP_AT = 1 << 25  # GROUP_AT_MESSAGE_CREATE 群聊@消息
-INTENT_PUBLIC_GUILD = 1 << 0  # 频道公开消息
+# QQ Bot Intents
+INTENT_GROUP_C2C = 1 << 25  # GROUP_AND_C2C_EVENT 群聊@ + 私聊消息
 
 # ── SSL ────────────────────────────────────────────────
 
@@ -139,7 +137,7 @@ class QQBotChannel:
             "op": OP_IDENTIFY,
             "d": {
                 "token": f"QQBot {await self._get_access_token()}",
-                "intents": INTENT_C2C | INTENT_GROUP_AT,
+                "intents": INTENT_GROUP_C2C,
                 "shard": [0, 1],
                 "properties": {},
             },
@@ -157,11 +155,13 @@ class QQBotChannel:
         :param reply_msg_id: 要回复的消息 ID（被动回复时必填）
         """
         token = await self._get_access_token()
-        msg_id = reply_msg_id if reply_msg_id else uuid.uuid4().hex
+        body: dict[str, object] = {"content": content, "msg_type": 0}
+        if reply_msg_id:
+            body["msg_id"] = reply_msg_id
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{self._api_base}/v2/users/{openid}/messages",
-                json={"content": content, "msg_type": 0, "msg_id": msg_id},
+                json=body,
                 headers={
                     "Authorization": f"QQBot {token}",
                     "Content-Type": "application/json",
@@ -180,11 +180,13 @@ class QQBotChannel:
         :param reply_msg_id: 要回复的消息 ID（被动回复时必填）
         """
         token = await self._get_access_token()
-        msg_id = reply_msg_id if reply_msg_id else uuid.uuid4().hex
+        body: dict[str, object] = {"content": content, "msg_type": 0}
+        if reply_msg_id:
+            body["msg_id"] = reply_msg_id
         async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{self._api_base}/v2/groups/{group_openid}/messages",
-                json={"content": content, "msg_type": 0, "msg_id": msg_id},
+                json=body,
                 headers={
                     "Authorization": f"QQBot {token}",
                     "Content-Type": "application/json",
@@ -272,20 +274,40 @@ class QQBotChannel:
 # ── 启动入口 ──────────────────────────────────────────
 
 
-async def run_qq_bot(config: Config, config_path: Path) -> None:
-    """启动 QQ 机器人通道。"""
+async def run_qq_bot(config: Config, config_path: Path, *, daemon: bool = False) -> None:
+    """启动 QQ 机器人通道。
+
+    :param config: 全局配置对象
+    :param config_path: 配置文件路径
+    :param daemon: 是否为后台守护进程模式（--daemon 内部参数）
+    """
+    import signal as _signal
+
     qq_conf = config.channels.qq
 
     if not qq_conf.app_id or not qq_conf.secret:
-        console.print("[red]QQ 通道未配置：请在 config.toml 的 [channels.qq] 中设置 app_id / secret[/red]")
+        logger.error("QQ 通道未配置：请在 config.toml 的 [channels.qq] 中设置 app_id / secret")
         raise SystemExit(1)
 
     if not config.provider.api_key:
-        console.print(f"[red]未找到 API Key：请在 {config_path} 的 [provider] 中设置 api_key[/red]")
+        logger.error("未找到 API Key：请在 %s 的 [provider] 中设置 api_key", config_path)
         raise SystemExit(1)
 
     agent = Agent.from_config_object(config)
     session = Session.new("qq", store=agent.store)
+
+    if config.channels.email.enabled and config.channels.email.sender and config.channels.email.password:
+        from minispark.channels.email import EmailChannel
+        from minispark.tools.function_call.email import create_email_tools
+
+        email_channel = EmailChannel(
+            sender=config.channels.email.sender,
+            password=config.channels.email.password,
+            to=config.channels.email.to,
+        )
+        for tool in create_email_tools(email_channel, default_to=config.channels.email.to):
+            agent.registry.register(tool)
+        logger.debug("邮件工具已注册: %s -> %s", config.channels.email.sender, config.channels.email.to or "（未设置默认收件人）")
 
     if agent.scheduler:
         async def _scheduled_run(prompt: str) -> str:
@@ -300,6 +322,269 @@ async def run_qq_bot(config: Config, config_path: Path) -> None:
         is_sandbox=qq_conf.is_sandbox,
     )
 
+    channel._current_openid = ""
+    channel._current_group_openid = ""
+    channel._current_msg_type = ""
+
+    if agent.scheduler:
+
+        async def _on_schedule_result(task: ScheduledTask, result: str) -> None:
+            logger.info("定时任务结果回调触发: %s, openid=%s, msg_type=%s",
+                        task.name, task.openid, task.msg_type)
+            if not task.openid:
+                logger.warning("定时任务 %s 没有关联用户，结果无法推送", task.name)
+                return
+            try:
+                if task.msg_type == "group" and task.group_openid:
+                    ok = await channel.send_group_message(task.group_openid, result)
+                else:
+                    ok = await channel.send_message(task.openid, result)
+                if ok:
+                    logger.info("定时任务结果已推送: %s -> %s", task.name, task.openid)
+                else:
+                    logger.error("定时任务结果推送失败（API 返回非 200）: %s -> %s", task.name, task.openid)
+            except Exception:
+                logger.exception("定时任务结果推送异常: %s", task.name)
+
+        agent.scheduler.set_on_result(_on_schedule_result)
+
+        original_schedule = create_schedule_tools(agent.scheduler)
+        for tool in original_schedule:
+            if tool.name == "schedule_task":
+                _orig_fn = tool.fn
+
+                def _wrapped_schedule(
+                    name: str,
+                    run_at: str = "",
+                    cron_expression: str = "",
+                    prompt: str = "",
+                    channel_name: str = "",
+                    openid: str = "",
+                    group_openid: str = "",
+                    msg_type: str = "",
+                    _fn=_orig_fn,
+                ) -> str:
+                    logger.info("schedule_task 被调用, openid=%s, group_openid=%s, msg_type=%s",
+                                channel._current_openid, channel._current_group_openid, channel._current_msg_type)
+                    return _fn(
+                        name=name,
+                        run_at=run_at,
+                        cron_expression=cron_expression,
+                        prompt=prompt,
+                        channel=channel_name,
+                        openid=channel._current_openid,
+                        group_openid=channel._current_group_openid,
+                        msg_type=channel._current_msg_type,
+                    )
+
+                from minispark.tools.base import FunctionTool
+                wrapped_tool = FunctionTool(_wrapped_schedule, name="schedule_task")
+                agent.registry.register(wrapped_tool)
+                logger.debug("schedule_task 工具已包装（注入 openid）")
+
+    _QQ_SLASH_HELP = """📋 会话命令
+/new [名称]     开新会话（长期记忆保留，历史清零）
+/sessions       列出所有会话
+/load <名称>    切换到指定会话
+/delete <名称>  删除指定会话的历史
+/history        查看当前会话全部消息
+/history -n N   查看当前会话最近 N 条消息
+/compact        强制压缩当前会话上下文
+
+📋 记忆命令
+/memory         查看所有长期记忆
+/forget <编号>  删除指定编号的长期记忆
+
+📋 调试命令
+/tools          列出所有已注册工具
+/skills         列出所有已发现技能
+/model [名称]   查看或切换模型
+/cron           查看所有定时任务
+/cron_cancel <ID>  取消指定定时任务
+
+📋 其他
+/help           显示本帮助"""
+
+
+    async def _handle_qq_slash(
+        text: str,
+        session: Session,
+        store: MemoryStore | None,
+        agent: Agent,
+    ) -> str:
+        """处理 QQ 通道的斜杠命令，返回文本回复。"""
+        from datetime import datetime
+
+        parts = text.split(maxsplit=1)
+        cmd = parts[0].lower()
+        arg = parts[1].strip() if len(parts) > 1 else ""
+
+        # ── 调试命令 ──
+        if cmd == "/tools":
+            from minispark.tools.base import FunctionTool
+            fc_tools = [t for t in agent.registry.tools if isinstance(t, FunctionTool)]
+            if not fc_tools:
+                return "（没有注册任何工具）"
+            lines = [f"已注册工具 ({len(fc_tools)} 个):"]
+            for t in fc_tools:
+                desc = t.description.splitlines()[0] if t.description else "-"
+                lines.append(f"  {t.name}  {desc}")
+            return "\n".join(lines)
+
+        if cmd == "/skills":
+            if not agent.skills:
+                return "（没有发现任何技能）"
+            lines = [f"已发现技能 ({len(agent.skills)} 个):"]
+            for name, skill in agent.skills.items():
+                lines.append(f"  {name}  {skill.description or '-'}")
+            return "\n".join(lines)
+
+        if cmd == "/cron":
+            if agent.scheduler is None:
+                return "调度器未初始化"
+            s = agent.scheduler
+            running = "运行中" if s.running else "未启动"
+            tasks = s.list()
+            if not tasks:
+                return f"调度器状态: {running}\n（没有定时任务）"
+            lines = [f"调度器状态: {running}", f"定时任务 ({len(tasks)} 个):"]
+            for t in tasks:
+                status = "启用" if t.enabled else "停用"
+                if t.run_at:
+                    schedule = f"定时 {t.run_at}（一次性）"
+                elif t.cron_expression:
+                    schedule = f"cron: {t.cron_expression}"
+                else:
+                    schedule = "无效"
+                lines.append(f"  [{status}] {t.name} (ID: {t.id}) {schedule}")
+            return "\n".join(lines)
+
+        if cmd == "/cron_cancel":
+            if agent.scheduler is None:
+                return "调度器未就绪"
+            if not arg:
+                return "用法：/cron_cancel <任务ID>（ID 用 /cron 查看）"
+            if agent.scheduler.remove(arg):
+                return f"已取消定时任务 (ID: {arg})"
+            return f"未找到定时任务 (ID: {arg})"
+
+        if cmd == "/model":
+            if arg:
+                old = agent.model
+                try:
+                    agent.switch_model(arg)
+                except Exception as e:
+                    return f"模型切换失败: {e}"
+                return f"模型已切换：{old} → {agent.model}"
+            models = await agent.list_models()
+            if not models:
+                return f"当前模型: {agent.model}\n（未能获取模型列表）"
+            lines = [f"当前模型: {agent.model}", "可用模型:"]
+            for m in models:
+                mark = " ← 当前" if m == agent.model else ""
+                lines.append(f"  {m}{mark}")
+            return "\n".join(lines)
+
+        # ── 会话命令 ──
+        if cmd == "/history":
+            msgs = session.messages
+            limit = 0
+            if arg.startswith("-n ") and arg[3:].strip().isdigit():
+                limit = int(arg[3:].strip())
+            elif arg.isdigit():
+                limit = int(arg)
+            msgs = msgs[-limit:] if limit > 0 else msgs
+            if not msgs:
+                return "（当前会话暂无历史）"
+            label = {"user": "你", "assistant": "MiniSpark", "tool": "工具"}
+            lines = []
+            for m in msgs:
+                role = str(m.get("role"))
+                content = str(m.get("content") or "")
+                lines.append(f"[{label.get(role, role)}] {content}")
+            return "\n".join(lines)
+
+        if cmd == "/compact":
+            if not agent:
+                return "Agent 未就绪，无法压缩"
+            before = len(session.messages)
+            if before == 0:
+                return "当前会话为空，无需压缩"
+            did = await agent.compact(session, force=True)
+            if did:
+                return f"已压缩上下文：{before} 条 → {len(session.messages)} 条（旧消息已摘要化）"
+            return "消息过少，没有可压缩的旧切片"
+
+        if cmd == "/new":
+            sid = arg or f"qq-{datetime.now():%m%d-%H%M}"
+            new_session = Session.new(sid, store=store)
+            session.messages = new_session.messages
+            session.session_id = new_session.session_id
+            session._persisted = new_session._persisted
+            return f"已开新会话 {sid}（长期记忆仍然保留）"
+
+        # ── 需要持久化存储的命令 ──
+        if store is None:
+            return "记忆存储未启用，会话管理不可用"
+
+        if cmd == "/sessions":
+            sessions = store.list_sessions()
+            if not sessions:
+                return "（还没有任何会话）"
+            lines = []
+            for s in sessions:
+                last = datetime.fromtimestamp(s["last"]).strftime("%m-%d %H:%M")
+                mark = " ← 当前" if s["session_id"] == session.session_id else ""
+                lines.append(f"  {s['session_id']}  ({s['n']} 条消息, 最后活跃 {last}){mark}")
+            return "\n".join(lines)
+
+        if cmd == "/memory":
+            memories = store.list_memories()
+            if not memories:
+                return "（还没有长期记忆）"
+            lines = []
+            for m in memories:
+                day = datetime.fromtimestamp(m["created_at"]).strftime("%m-%d")
+                tag = f" [{m['tags']}]" if m["tags"] else ""
+                lines.append(f"  #{m['id']} ({day}){tag} {m['content']}")
+            return "\n".join(lines)
+
+        if cmd == "/forget":
+            if not arg.isdigit():
+                return "用法：/forget <记忆编号>（编号用 /memory 查看）"
+            if store.delete_memory(int(arg)):
+                return f"已删除记忆 #{arg}"
+            return f"记忆 #{arg} 不存在"
+
+        if cmd == "/load":
+            if not arg:
+                return "用法：/load <会话名称>"
+            known = {s["session_id"] for s in store.list_sessions()}
+            if arg not in known:
+                return f"会话 {arg} 不存在，用 /sessions 查看"
+            loaded = Session.new(arg, store=store)
+            session.messages = loaded.messages
+            session.session_id = loaded.session_id
+            session._persisted = loaded._persisted
+            return f"已切换到会话 {arg}"
+
+        if cmd == "/delete":
+            if not arg:
+                return "用法：/delete <会话名称>"
+            n = store.delete_session(arg)
+            if arg == session.session_id:
+                new_session = Session.new(arg, store=store)
+                session.messages = new_session.messages
+                session.session_id = new_session.session_id
+                session._persisted = new_session._persisted
+            return f"已删除 {arg}（{n} 条消息）"
+
+        if cmd == "/help":
+            return _QQ_SLASH_HELP
+
+        return f"未知命令: {cmd}，输入 /help 查看帮助"
+
+
     async def on_message(
         msg_type: str,
         openid: str,
@@ -310,13 +595,20 @@ async def run_qq_bot(config: Config, config_path: Path) -> None:
         if not content:
             return
 
-        console.print(f"[dim]QQ 收到消息 ({msg_type}): {content[:50]}...[/dim]")
+        logger.info("QQ 收到消息 (%s): %s...", msg_type, content[:50])
 
-        try:
-            reply = await agent.run(content, session)
-        except Exception as e:
-            logger.exception("Agent 处理失败")
-            reply = f"抱歉，处理出错了：{e}"
+        channel._current_openid = openid
+        channel._current_group_openid = group_openid
+        channel._current_msg_type = msg_type
+
+        if content.startswith("/"):
+            reply = await _handle_qq_slash(content, session, agent.store, agent)
+        else:
+            try:
+                reply = await agent.run(content, session)
+            except Exception as e:
+                logger.exception("Agent 处理失败")
+                reply = f"抱歉，处理出错了：{e}"
 
         if not reply:
             return
@@ -328,20 +620,31 @@ async def run_qq_bot(config: Config, config_path: Path) -> None:
             ok = await channel.send_message(openid, reply, reply_msg_id=msg_id)
 
         if ok:
-            console.print(f"[dim]QQ 回复已发送 ({msg_type})[/dim]")
+            logger.info("QQ 回复已发送 (%s)", msg_type)
         else:
-            console.print(f"[red]QQ 回复发送失败 ({msg_type})[/red]")
+            logger.warning("QQ 回复发送失败 (%s)", msg_type)
 
     channel._on_message = on_message
 
-    console.print(f"[cyan]QQ 机器人已启动[/cyan]")
-    console.print(f"  App ID: {qq_conf.app_id}")
-    console.print(f"  环境: {'沙箱（测试）' if qq_conf.is_sandbox else '正式'}")
-    console.print(f"  API: {channel._api_base}")
+    if daemon:
+        def _shutdown(signum: int, frame: object) -> None:
+            logger.info("收到信号 %s，正在关闭 QQ 机器人...", signum)
+            channel._running = False
+
+        _signal.signal(_signal.SIGTERM, _shutdown)
+        _signal.signal(_signal.SIGINT, _shutdown)
+
+    logger.info("QQ 机器人已启动 | App ID: %s | 环境: %s | API: %s",
+                qq_conf.app_id,
+                "沙箱（测试）" if qq_conf.is_sandbox else "正式",
+                channel._api_base)
 
     try:
         await channel.run()
     except KeyboardInterrupt:
-        console.print("[dim]QQ 机器人已停止[/dim]")
+        logger.info("QQ 机器人已停止（KeyboardInterrupt）")
+    except asyncio.CancelledError:
+        logger.info("QQ 机器人任务已取消")
     finally:
         await channel.stop()
+        logger.info("QQ 机器人已完全关闭")
